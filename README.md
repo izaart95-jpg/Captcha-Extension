@@ -38,7 +38,7 @@ Dashboard: http://localhost:5000
 1. Open your browser → `chrome://extensions` (or `brave://extensions`)
 2. Enable **Developer mode** (top right toggle)
 3. Click **Load unpacked**
-4. Select the `arena_harvester_extension/` folder
+4. Select the `extension/` folder
 5. The 🎯 icon appears in your toolbar
 
 ### 3. Harvest
