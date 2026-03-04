@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Arena reCAPTCHA Harvester",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Harvests reCAPTCHA v2/v3 tokens on arena.ai and sends them to a local server.",
 
   "permissions": [
@@ -9,7 +9,7 @@
     "cookies",
     "tabs",
     "scripting",
-    "alarms"
+    "webNavigation"
   ],
 
   "host_permissions": [
@@ -18,8 +18,7 @@
   ],
 
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
 
   "content_scripts": [
@@ -38,12 +37,5 @@
       "48":  "icons/icon48.png",
       "128": "icons/icon128.png"
     }
-  },
-
-  "web_accessible_resources": [
-    {
-      "resources": ["injected.js"],
-      "matches": ["https://arena.ai/*"]
-    }
-  ]
+  }
 }
