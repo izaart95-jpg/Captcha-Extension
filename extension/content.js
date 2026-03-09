@@ -5,18 +5,10 @@
  *
  * Responsibilities:
  *   - Install the fetch blocker (removes forceLowRecaptchaScore) immediately
- *   - Provide a message bridge so the page's injected harvester scripts can
- *     communicate with the background service worker via chrome.runtime
- *
- * Note: Content scripts run in an isolated world — they can't directly reach
- * window.grecaptcha. The actual harvester JS (injectV2Harvester / injectV3Harvester)
- * is injected into the MAIN world by the background via chrome.scripting.executeScript.
- * This file just handles the relay layer.
+ *   - Bridge page → background for TOKEN_STORED so TUNING reloads actually fire
  */
 
-// ─── Install fetch blocker in MAIN world via classic script injection ─────────
-// Content scripts can't override window.fetch directly in the page context,
-// so we create a <script> element to run in the MAIN world.
+// ─── Install fetch blocker in MAIN world ──────────────────────────────────────
 
 function installBlockerViaScript() {
   if (document.getElementById("__arena_blocker_script__")) return;
@@ -52,15 +44,31 @@ function installBlockerViaScript() {
     })();
   `;
   (document.head || document.documentElement).appendChild(s);
-  s.remove(); // clean up DOM after execution
+  s.remove();
 }
 
 installBlockerViaScript();
 
-// ─── Listen for messages from background → forward page-visible notifications ─
+// ─── Bridge: page window messages → background service worker ─────────────────
+// Harvester scripts (running in MAIN world) dispatch a CustomEvent after a token
+// is successfully stored. We relay that here so background.js can trigger reloads.
+//
+// Event fired from injected scripts:
+//   window.dispatchEvent(new CustomEvent('__arena_token_stored__', {
+//     detail: { tabId, version }
+//   }));
+
+window.addEventListener("__arena_token_stored__", (e) => {
+  const { tabId, version } = e.detail || {};
+  chrome.runtime.sendMessage({ type: "TOKEN_STORED", tabId, version })
+    .catch(() => {}); // ignore if background is busy
+});
+
+// ─── Listen for messages from background ──────────────────────────────────────
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "STATE_UPDATE") {
-    // Could dispatch a custom event to the page if needed in future
+    // Reserved for future page-level notifications
   }
 });
 

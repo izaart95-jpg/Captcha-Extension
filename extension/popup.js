@@ -4,11 +4,12 @@
 
 let _config = {};
 let _toastTimer = null;
+let _configPanelOpen = false;
+let _configDirty = false; // true while user is editing — suppress refresh overwrites
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Static buttons
   document.getElementById("config-toggle").addEventListener("click", toggleConfig);
   document.getElementById("btn-save-config").addEventListener("click", saveConfig);
   document.getElementById("btn-refresh").addEventListener("click", refresh);
@@ -20,7 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
     chrome.tabs.create({ url: "https://arena.ai" });
   });
 
-  // Real-time push from background
+  document.getElementById("btn-add-cookie").addEventListener("click", () => { addCookieRow(""); _configDirty = true; });
+  document.getElementById("config-panel").addEventListener("input",  () => { _configDirty = true; });
+  document.getElementById("config-panel").addEventListener("change", () => { _configDirty = true; });
+
   chrome.runtime.onMessage.addListener(msg => {
     if (msg.type === "STATE_UPDATE") refresh();
   });
@@ -36,16 +40,11 @@ async function refresh() {
     const state = await sendMsg({ type: "GET_STATE" });
     if (!state.ok) return;
 
+    // Only update config UI when panel is closed and user hasn't touched anything
+    if (!_configPanelOpen && !_configDirty) {
+      applyConfigToUI(state.config || {});
+    }
     _config = state.config || {};
-
-    // Config panel values
-    document.getElementById("cfg-port").value           = _config.SERVER_PORT || 5000;
-    document.getElementById("cfg-tuning").checked       = !!_config.TUNING;
-    document.getElementById("cfg-hard-tuning").checked  = !!_config.HARD_TUNING;
-    document.getElementById("cfg-hard-tuning").disabled = !_config.TUNING;
-    document.getElementById("cfg-five-gain").checked    = !!_config.FIVE_GAIN;
-    document.getElementById("cfg-eval-id").value        = _config.EVAL_ID || "";
-    document.getElementById("eval-id-row").style.display = _config.FIVE_GAIN ? "block" : "none";
 
     await fetchServerStats();
     renderTabs(state.tabs || []);
@@ -53,6 +52,25 @@ async function refresh() {
   } catch (e) {
     console.error("[popup] refresh error:", e);
   }
+}
+
+function applyConfigToUI(cfg) {
+  _config = cfg;
+  document.getElementById("cfg-port").value           = cfg.SERVER_PORT || 5000;
+  document.getElementById("cfg-tuning").checked       = !!cfg.TUNING;
+  document.getElementById("cfg-hard-tuning").checked  = !!cfg.HARD_TUNING;
+  document.getElementById("cfg-hard-tuning").disabled = !cfg.TUNING;
+  document.getElementById("cfg-five-gain").checked    = !!cfg.FIVE_GAIN;
+  document.getElementById("cfg-eval-id").value        = cfg.EVAL_ID || "";
+  document.getElementById("eval-id-row").style.display = cfg.FIVE_GAIN ? "block" : "none";
+
+  // Render cookie names list
+  renderCookieNames(cfg.HARD_TUNING_KEEP || [
+    "arena-auth-prod-v1.0",
+    "arena-auth-prod-v1.1",
+    "__cf_bm",
+    "cf_clearance",
+  ]);
 }
 
 async function fetchServerStats() {
@@ -75,6 +93,41 @@ async function fetchServerStats() {
       document.getElementById(id).textContent = "–";
     });
   }
+}
+
+// ─── Cookie name editor ───────────────────────────────────────────────────────
+
+function getCookieNames() {
+  const items = document.querySelectorAll(".cookie-name-input");
+  return Array.from(items)
+    .map(i => i.value.trim())
+    .filter(Boolean);
+}
+
+function renderCookieNames(names) {
+  const list = document.getElementById("cookie-names-list");
+  list.innerHTML = "";
+  names.forEach(name => addCookieRow(name));
+}
+
+function addCookieRow(value = "") {
+  const list = document.getElementById("cookie-names-list");
+  const row  = document.createElement("div");
+  row.className = "cookie-row";
+  row.innerHTML = `
+    <input class="cfg-input cookie-name-input" type="text" value="${escHtml(value)}" placeholder="cookie_name">
+    <button class="cookie-del-btn" title="Remove">✕</button>
+  `;
+  row.querySelector(".cookie-del-btn").addEventListener("click", () => {
+    row.remove();
+    _configDirty = true;
+  });
+  list.appendChild(row);
+  _configDirty = true;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
 // ─── Render tab cards ─────────────────────────────────────────────────────────
@@ -126,7 +179,6 @@ function renderTabs(tabs) {
     </div>`;
   }).join("");
 
-  // Wire up all tab buttons via delegation
   container.querySelectorAll("button[data-action]").forEach(btn => {
     btn.addEventListener("click", onTabButton);
   });
@@ -158,8 +210,15 @@ async function onTabButton(e) {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 function toggleConfig() {
-  document.getElementById("config-toggle").classList.toggle("open");
-  document.getElementById("config-panel").classList.toggle("open");
+  _configPanelOpen = !_configPanelOpen;
+  document.getElementById("config-toggle").classList.toggle("open", _configPanelOpen);
+  document.getElementById("config-panel").classList.toggle("open", _configPanelOpen);
+
+  // When opening, load fresh values from last known config
+  if (_configPanelOpen) {
+    applyConfigToUI(_config);
+    _configDirty = false; // reset — user hasn't changed anything yet
+  }
 }
 
 function onTuningChange() {
@@ -179,17 +238,19 @@ async function saveConfig() {
   errEl.style.display = "none";
 
   const cfg = {
-    SERVER_PORT: parseInt(document.getElementById("cfg-port").value, 10) || 5000,
-    TUNING:      document.getElementById("cfg-tuning").checked,
-    HARD_TUNING: document.getElementById("cfg-hard-tuning").checked,
-    FIVE_GAIN:   document.getElementById("cfg-five-gain").checked,
-    EVAL_ID:     document.getElementById("cfg-eval-id").value.trim(),
+    SERVER_PORT:      parseInt(document.getElementById("cfg-port").value, 10) || 5000,
+    TUNING:           document.getElementById("cfg-tuning").checked,
+    HARD_TUNING:      document.getElementById("cfg-hard-tuning").checked,
+    FIVE_GAIN:        document.getElementById("cfg-five-gain").checked,
+    EVAL_ID:          document.getElementById("cfg-eval-id").value.trim(),
+    HARD_TUNING_KEEP: getCookieNames(),
   };
 
   const r = await sendMsg({ type: "SAVE_CONFIG", config: cfg });
   if (r.ok) {
     toast("Settings saved ✓", "#4ade80");
     _config = cfg;
+    _configDirty = false;
   } else {
     errEl.textContent   = r.error || "Save failed";
     errEl.style.display = "block";

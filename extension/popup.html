@@ -53,6 +53,20 @@
   .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
   .cfg-input { background: #1a1a2e; border: 1px solid #374151; border-radius: 6px; color: #e0e0e0; font-size: 12px; padding: 4px 8px; width: 100%; margin-top: 4px; }
   .cfg-input:focus { outline: 1px solid #7c3aed; }
+
+  /* Cookie names editor */
+  .cookie-section { margin-bottom: 10px; }
+  .cookie-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .cookie-section-header .cfg-label { margin: 0; }
+  .cookie-add-btn { background: #1a1a2e; border: 1px dashed #4b5563; border-radius: 5px; color: #7c3aed; font-size: 11px; padding: 2px 10px; cursor: pointer; }
+  .cookie-add-btn:hover { border-color: #7c3aed; background: #1e1e3a; }
+  #cookie-names-list { display: flex; flex-direction: column; gap: 5px; }
+  .cookie-row { display: flex; gap: 6px; align-items: center; }
+  .cookie-row .cfg-input { margin: 0; flex: 1; font-family: monospace; font-size: 11px; }
+  .cookie-del-btn { flex-shrink: 0; background: #3b1010; border: none; color: #f87171; border-radius: 5px; width: 22px; height: 22px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  .cookie-del-btn:hover { background: #5a1a1a; }
+  .cookie-empty { font-size: 11px; color: #4b5563; font-style: italic; padding: 4px 0; }
+
   .save-btn { width: 100%; padding: 7px; background: #7c3aed; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 6px; }
   .save-btn:hover { background: #6d28d9; }
   .footer { padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; }
@@ -67,6 +81,7 @@
   #toast { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%) translateY(40px); background: #1a1a2e; border: 1px solid #4b5563; border-radius: 8px; padding: 6px 14px; font-size: 12px; color: #e0e0e0; opacity: 0; transition: all 0.25s; pointer-events: none; white-space: nowrap; z-index: 9999; }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .err { color: #f87171; font-size: 11px; margin-top: 4px; }
+  .cfg-divider { border: none; border-top: 1px solid #1e1e3a; margin: 10px 0; }
 </style>
 </head>
 <body>
@@ -113,6 +128,23 @@
     <div class="cfg-label">Eval / Conversation ID</div>
     <input class="cfg-input" id="cfg-eval-id" type="text" placeholder="e.g. abc123xyz">
   </div>
+
+  <hr class="cfg-divider">
+
+  <!-- Cookie names editor -->
+  <div class="cookie-section">
+    <div class="cookie-section-header">
+      <div>
+        <div class="cfg-label">HARD TUNING — Keep Cookies</div>
+        <div class="cfg-sub">Cookies preserved during hard-wipe. Edit, add, or remove names.</div>
+      </div>
+      <button class="cookie-add-btn" id="btn-add-cookie">+ Add</button>
+    </div>
+    <div id="cookie-names-list">
+      <div class="cookie-empty">Loading...</div>
+    </div>
+  </div>
+
   <div id="cfg-error" class="err" style="display:none;"></div>
   <button class="save-btn" id="btn-save-config">Save Settings</button>
 </div>

@@ -6,19 +6,18 @@
 // ─── Config defaults ──────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
-  SERVER_PORT: 5000,
-  FIVE_GAIN:   false,
-  EVAL_ID:     "",
-  TUNING:      true,
-  HARD_TUNING: false,
+  SERVER_PORT:      5000,
+  FIVE_GAIN:        false,
+  EVAL_ID:          "",
+  TUNING:           true,
+  HARD_TUNING:      false,
+  HARD_TUNING_KEEP: [
+    "arena-auth-prod-v1.0",
+    "arena-auth-prod-v1.1",
+    "__cf_bm",
+    "cf_clearance",
+  ],
 };
-
-const HARD_TUNING_KEEP = new Set([
-  "arena-auth-prod-v1.0",
-  "arena-auth-prod-v1.1",
-  "__cf_bm",
-  "cf_clearance",
-]);
 
 // Per-tab state: { status, activeHarvester, tokenCount }
 const tabState = {};
@@ -38,9 +37,6 @@ function saveConfig(cfg) {
 }
 
 // ─── Core injection helper ────────────────────────────────────────────────────
-// Injects a JS string into the MAIN world of a tab.
-// We use the (code => eval(code)) pattern to avoid MV3 function-serialization
-// issues where closures and referenced outer functions are lost.
 
 function runInTab(tabId, jsString) {
   return chrome.scripting.executeScript({
@@ -107,6 +103,7 @@ function getV2Script(tabId, serverPort) {
     }).then(function(r) { return r.json(); }).then(function(data) {
       console.log('[v2-' + mode + ' #' + v2Count + '] Stored. Total: ' + data.total_count);
       if (panelCreated) updateStatus('Token #' + v2Count + ' stored! Reloading...');
+      window.dispatchEvent(new CustomEvent('__arena_token_stored__', { detail: { tabId: TAB_ID, version: 'v2' } }));
     }).catch(function(err) { console.error('[v2-' + mode + '] Store failed:', err); });
   }
 
@@ -214,6 +211,7 @@ function getV3Script(tabId, serverPort) {
         }).then(function(r) { return r.json(); }).then(function(data) {
           console.log('[v3 #' + tokenCount + '] Stored. Total: ' + data.total_count);
           window.__STRIPE_DEVICE_ID__ = token;
+          window.dispatchEvent(new CustomEvent('__arena_token_stored__', { detail: { tabId: TAB_ID, version: 'v3' } }));
           scheduleNext();
         });
       }).catch(function(err) { console.error('[v3] Error:', err); scheduleNext(); });
@@ -287,10 +285,10 @@ function getInvisibleScript(serverPort) {
 
 // ─── HARD_TUNING helpers ──────────────────────────────────────────────────────
 
-async function hardTuningCycleCookies() {
+async function hardTuningCycleCookies(keepSet) {
   try {
-    const all = await chrome.cookies.getAll({ domain: "arena.ai" });
-    const saved = all.filter(c => HARD_TUNING_KEEP.has(c.name));
+    const all   = await chrome.cookies.getAll({ domain: "arena.ai" });
+    const saved = all.filter(c => keepSet.has(c.name));
     console.log("[bg][HARD_TUNING] Saving:", saved.map(c => c.name).join(", ") || "none");
     for (const c of all) {
       const url = `http${c.secure ? "s" : ""}://${c.domain.replace(/^\./, "")}${c.path}`;
@@ -332,8 +330,14 @@ async function reloadTabAfterToken(tabId, version) {
   state.status = "reloading";
   broadcastStateUpdate();
 
+  // Build keep-set from config (falls back to defaults if empty)
+  const keepList = (cfg.HARD_TUNING_KEEP && cfg.HARD_TUNING_KEEP.length > 0)
+    ? cfg.HARD_TUNING_KEEP
+    : DEFAULT_CONFIG.HARD_TUNING_KEEP;
+  const keepSet = new Set(keepList);
+
   let savedCookies = [];
-  if (cfg.HARD_TUNING) savedCookies = await hardTuningCycleCookies();
+  if (cfg.HARD_TUNING) savedCookies = await hardTuningCycleCookies(keepSet);
 
   const targetUrl = (cfg.FIVE_GAIN && cfg.EVAL_ID)
     ? `https://arena.ai/c/${cfg.EVAL_ID}`
@@ -429,6 +433,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
 
+        // ── TOKEN_STORED: fired by server relay when a token arrives ──────────
+        // The extension's injected scripts already POST directly to the server.
+        // To trigger the reload, the server needs to call back — OR we intercept
+        // the fetch response inside the page.  The cleanest approach: listen for
+        // a custom window message that the harvester scripts fire after sendToken().
+        // But since scripts already have _reload_after:true in the payload, we use
+        // a dedicated message type that content.js forwards from the page.
+        case "TOKEN_STORED": {
+          const { tabId, version } = msg;
+          if (!cfg.TUNING) { sendResponse({ ok: true }); break; }
+          const s = tabState[tabId];
+          if (s) s.tokenCount = (s.tokenCount || 0) + 1;
+          // Fire-and-forget reload — don't await so response goes out first
+          reloadTabAfterToken(tabId, version).catch(e => console.error("[bg] reload error:", e));
+          sendResponse({ ok: true });
+          break;
+        }
+
         case "V2_START": {
           const { tabId } = msg;
           if (!tabState[tabId]) tabState[tabId] = { status: "idle", activeHarvester: null, tokenCount: 0 };
@@ -500,7 +522,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: false, error: e.message });
     }
   })();
-  return true; // keep async channel open
+  return true;
 });
 
 // ─── Tab close cleanup ────────────────────────────────────────────────────────
